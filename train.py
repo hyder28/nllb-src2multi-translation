@@ -115,6 +115,33 @@ class MultilingualSeq2SeqTrainer(Seq2SeqTrainer):
             self.save_metrics("eval_{}_ep{}".format(lang_pair, self.state.epoch), result)
 
         return eval_results
+    
+    def predict(self, test_dataset, ignore_keys = None, metric_key_prefix = "test", **gen_kwargs):
+        """Overrides predict method to handle a dictionary of datasets"""
+        if isinstance(test_dataset, dict):
+            predictions = {}
+            for lang_pair, dataset in test_dataset.items():
+                source_lang, target_lang = lang_pair.split("#")
+                global current_stage, current_target_lang
+                current_stage = "predict"
+                current_target_lang = target_lang
+
+                logger.info("*" * 60)
+                logger.info("Running prediction for lang pair {}".format(lang_pair))
+                logger.info("*" * 60)
+
+                forced_bos_token_id = None
+                if hasattr(self.tokenizer, "lang_code_to_id"):
+                    forced_bos_token_id = self.tokenizer.lang_code_to_id(flores_lang_code_mapping[target_lang])
+
+                result = super().predict(test_dataset = dataset, ignore_keys = ignore_keys, metric_key_prefix = f"{metric_key_prefix}_{lang_pair}", forced_bos_token_id = forced_bos_token_id, **gen_kwargs)
+                predictions[lang_pair] = result
+            
+            return predictions
+        
+        # if not a dict, fallback to the normal predict method
+        return super().predict(test_dataset, ignore_keys, metric_key_prefix, **gen_kwargs)
+                
 
 
 
