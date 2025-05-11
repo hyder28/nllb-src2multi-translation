@@ -1,0 +1,5 @@
+jsonlines==4.0.0
+datasets==2.19.1
+evaluate==0.4.0
+accelerate==0.30.0
+transformers==4.29.2
