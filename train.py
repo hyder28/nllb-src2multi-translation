@@ -27,6 +27,7 @@ import datasets
 import evaluate
 import numpy as np
 from datasets import load_dataset
+import jsonlines
 
 import transformers
 from transformers import (
@@ -76,7 +77,7 @@ def concat_tensor_to_len(t, dim, max_len, value):
 
 
 def get_langs(examples, source_lang):
-    tg_langs = []
+    tgt_langs = []
     for ex in examples:
         lang = [lang for lang in ex if lang not in [source_lang] and ex[lang] != ""]
         if len(lang) != 1:
@@ -335,228 +336,230 @@ class DataTrainingArguments:
             self.val_max_target_length = self.max_target_length
 
 
-# def main():
-#     # See all possible arguments in src/transformers/training_args.py
-#     # or by passing the --help flag to this script.
-#     # We now keep distinct sets of args, for a cleaner separation of concerns.
+def main():
+    # See all possible arguments in src/transformers/training_args.py
+    # or by passing the --help flag to this script.
+    # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-#     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, Seq2SeqTrainingArguments))
-#     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-#         # If we pass only one argument to the script and it's the path to a json file,
-#         # let's parse it to get our arguments.
-#         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
-#     else:
-#         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, Seq2SeqTrainingArguments))
+    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
+        # If we pass only one argument to the script and it's the path to a json file,
+        # let's parse it to get our arguments.
+        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+    else:
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-#     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-#     # information sent is the one passed as arguments along with your Python/PyTorch versions.
-#     send_example_telemetry("run_translation", model_args, data_args)
+    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
+    # information sent is the one passed as arguments along with your Python/PyTorch versions.
+    send_example_telemetry("run_translation", model_args, data_args)
 
-#     # Setup logging
-#     logging.basicConfig(
-#         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-#         datefmt="%m/%d/%Y %H:%M:%S",
-#         handlers=[logging.StreamHandler(sys.stdout)],
-#     )
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
 
-#     if training_args.should_log:
-#         # The default of training_args.log_level is passive, so we set log level at info here to have that default.
-#         transformers.utils.logging.set_verbosity_info()
+    if training_args.should_log:
+        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
+        transformers.utils.logging.set_verbosity_info()
 
-#     log_level = training_args.get_process_log_level()
-#     logger.setLevel(log_level)
-#     datasets.utils.logging.set_verbosity(log_level)
-#     transformers.utils.logging.set_verbosity(log_level)
-#     transformers.utils.logging.enable_default_handler()
-#     transformers.utils.logging.enable_explicit_format()
+    log_level = training_args.get_process_log_level()
+    logger.setLevel(log_level)
+    datasets.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.enable_default_handler()
+    transformers.utils.logging.enable_explicit_format()
 
-#     # Log on each process the small summary:
-#     logger.warning(
-#         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
-#         + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
-#     )
-#     logger.info(f"Training/evaluation parameters {training_args}")
+    # Log on each process the small summary:
+    logger.warning(
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+        + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
+    )
+    logger.info(f"Training/evaluation parameters {training_args}")
 
-#     if data_args.source_prefix is None and model_args.model_name_or_path in [
-#         "google-t5/t5-small",
-#         "google-t5/t5-base",
-#         "google-t5/t5-large",
-#         "google-t5/t5-3b",
-#         "google-t5/t5-11b",
-#     ]:
-#         logger.warning(
-#             "You're running a t5 model but didn't provide a source prefix, which is expected, e.g. with "
-#             "`--source_prefix 'translate English to German: ' `"
-#         )
+    # Detecting last checkpoint.
+    last_checkpoint = None
+    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
+        last_checkpoint = get_last_checkpoint(training_args.output_dir)
+        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
+            raise ValueError(
+                f"Output directory ({training_args.output_dir}) already exists and is not empty. "
+                "Use --overwrite_output_dir to overcome."
+            )
+        elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
+            logger.info(
+                f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
+                "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
+            )
 
-#     # Detecting last checkpoint.
-#     last_checkpoint = None
-#     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
-#         last_checkpoint = get_last_checkpoint(training_args.output_dir)
-#         if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
-#             raise ValueError(
-#                 f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-#                 "Use --overwrite_output_dir to overcome."
-#             )
-#         elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
-#             logger.info(
-#                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
-#                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
-#             )
+    # Set seed before initializing model.
+    set_seed(training_args.seed)
 
-#     # Set seed before initializing model.
-#     set_seed(training_args.seed)
+    # Get the language codes for input/target.
+    source_lang = data_args.source_lang
+    target_lang = data_args.target_lang
+    logger.info(f"source_lang: {}, target_lang: {}".format(source_lang, target_lang)) # source_lang: en-US, target_lang: ['zh-CN', 'ru-RU']
 
-#     # Get the datasets: you can either provide your own JSON training and evaluation files (see below)
-#     # or just provide the name of one of the public datasets available on the hub at https://huggingface.co/datasets/
-#     # (the dataset will be downloaded automatically from the datasets Hub).
-#     #
-#     # For translation, only JSON files are supported, with one field named "translation" containing two keys for the
-#     # source and target languages (unless you adapt what follows).
-#     #
-#     # In distributed training, the load_dataset function guarantee that only one local process can concurrently
-#     # download the dataset.
-#     if data_args.dataset_name is not None:
-#         # Downloading and loading a dataset from the hub.
-#         raw_datasets = load_dataset(
-#             data_args.dataset_name,
-#             data_args.dataset_config_name,
-#             cache_dir=model_args.cache_dir,
-#             token=model_args.token,
-#             trust_remote_code=model_args.trust_remote_code,
-#         )
-#     else:
-#         data_files = {}
-#         if data_args.train_file is not None:
-#             data_files["train"] = data_args.train_file
-#             extension = data_args.train_file.split(".")[-1]
-#         if data_args.validation_file is not None:
-#             data_files["validation"] = data_args.validation_file
-#             extension = data_args.validation_file.split(".")[-1]
-#         if data_args.test_file is not None:
-#             data_files["test"] = data_args.test_file
-#             extension = data_args.test_file.split(".")[-1]
-#         if extension == "jsonl":
-#             builder_name = "json"  # the "json" builder reads both .json and .jsonl files
-#         else:
-#             builder_name = extension  # e.g. "parquet"
-#         raw_datasets = load_dataset(
-#             builder_name,
-#             data_files=data_files,
-#             cache_dir=model_args.cache_dir,
-#             token=model_args.token,
-#         )
-#     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-#     # https://huggingface.co/docs/datasets/loading.
 
-#     # Load pretrained model and tokenizer
-#     #
-#     # Distributed training:
-#     # The .from_pretrained methods guarantee that only one local process can concurrently
-#     # download model & vocab.
-#     config = AutoConfig.from_pretrained(
-#         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
-#         cache_dir=model_args.cache_dir,
-#         revision=model_args.model_revision,
-#         token=model_args.token,
-#         trust_remote_code=model_args.trust_remote_code,
-#     )
-#     tokenizer = AutoTokenizer.from_pretrained(
-#         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
-#         cache_dir=model_args.cache_dir,
-#         use_fast=model_args.use_fast_tokenizer,
-#         revision=model_args.model_revision,
-#         token=model_args.token,
-#         trust_remote_code=model_args.trust_remote_code,
-#     )
-#     model = AutoModelForSeq2SeqLM.from_pretrained(
-#         model_args.model_name_or_path,
-#         from_tf=bool(".ckpt" in model_args.model_name_or_path),
-#         config=config,
-#         cache_dir=model_args.cache_dir,
-#         revision=model_args.model_revision,
-#         token=model_args.token,
-#         trust_remote_code=model_args.trust_remote_code,
-#     )
+    # Get the datasets: you can either provide your own JSON training and evaluation files (see below)
+    # or just provide the name of one of the public datasets available on the hub at https://huggingface.co/datasets/
+    # (the dataset will be downloaded automatically from the datasets Hub).
+    #
+    # For translation, only JSON files are supported, with one field named "translation" containing two keys for the
+    # source and target languages (unless you adapt what follows).
+    #
+    # In distributed training, the load_dataset function guarantee that only one local process can concurrently
+    # download the dataset.
+    if data_args.dataset_name is not None:
+        # Downloading and loading a dataset from the hub.
+        raw_datasets = load_dataset(
+            data_args.dataset_name,
+            data_args.dataset_config_name,
+            cache_dir=model_args.cache_dir,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
+        )
+    else:
+        data_files = {}
+        if data_args.train_file is not None:
+            data_files["train"] = data_args.train_file
+            extension = data_args.train_file.split(".")[-1]
+        if data_args.validation_file is not None:
+            if len(data_args.validation_file) != len(target_lang):
+                logger.info("target_lang: {}".format(target_lang))
+                logger.info("validation_file: {}".format(data_args.validation_file))
+                raise ValueError("validation_file must match target lang")
+            for lang, fname in zip(target_lang, data_args.validation_file):
+                data_files["validation.{}.{}".format(source_lang.replace("-", "_"), lang.replace("-", "_"))] = fname
+            extension = data_args.validation_file[0].split(".")[-1]
+        if data_args.test_file is not None:
+            if len(data_args.test_file) != len(target_lang):
+                logger.info("target_lang: {}".format(target_lang))
+                logger.info("test_file: {}".format(data_args.test_file))
+                raise ValueError("test_file must match target lang")
+            for lang, fname in zip(target_lang, data_args.test_file):
+                data_files["test.{}.{}".format(source_lang.replace("-", "_"), lang.replace("-", "_"))] = fname
+            extension = data_args.test_file[0].split(".")[-1]
 
-#     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
-#     # on a small vocab and want a smaller embedding size, remove this test.
-#     embedding_size = model.get_input_embeddings().weight.shape[0]
-#     if len(tokenizer) > embedding_size:
-#         model.resize_token_embeddings(len(tokenizer))
+        if extension == "jsonl":
+            builder_name = "json"
+        else:
+            builder_name = extension
 
-#     # Set decoder_start_token_id
-#     if model.config.decoder_start_token_id is None and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast)):
-#         if isinstance(tokenizer, MBartTokenizer):
-#             model.config.decoder_start_token_id = tokenizer.lang_code_to_id[data_args.target_lang]
-#         else:
-#             model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(data_args.target_lang)
+        raw_datasets = load_dataset(
+            builder_name,
+            data_files=data_files,
+            cache_dir=model_args.cache_dir,
+            token=model_args.token,
+        )
 
-#     if model.config.decoder_start_token_id is None:
-#         raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
+    # Load glossary for training and computing EMTA metric
+    if data_args.glossary_file is not None:
+        if len(data_args.glossary_file) != len(target_lang):
+            logger.info("target_lang: {}".format(target_lang))
+            logger.info("glossary_file: {}".format(data_args.glossary_file))
+            raise ValueError("glossary_file must match target lang")
+        glossary = {}
+        glossary_lowersrc = {}
+        src_terms = {}
+        tgt_terms = {}
+        for lang, fname in zip(target_lang, data_args.glossary_file):
+            glossary[lang] = {}
+            with jsonlines.open(fname, "r") as reader:
+                for l in reader:
+                    glossary[lang][l['translation'][source_lang]] = l['translation'][lang]
+            glossary_lowersrc[lang] = {k.lower(): v for k, v in glossary[lang].items()}
+            src_terms[lang] = list(glossary[lang].keys())
+            tgt_terms[lang] = list(glossary[lang].values())
+            logger.info("Successfully loaded glossary for {} with {} pairs".format(lang, len(glossary[lang])))
 
-#     prefix = data_args.source_prefix if data_args.source_prefix is not None else ""
+    
+    config = AutoConfig.from_pretrained(model_args.config_name if model_args.config_name else model_args.model_name_or_path,
+                                        cache_dir=model_args.cache_dir)
+    tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
+                                              cache_dir=model_args.cache_dir,
+                                              use_fast=model_args.use_fast_tokenizer, 
+                                              src_lang = flores_lang_code_mapping[source_lang])
+    
+    
+    if len(target_lang) > 1:
+        tokenizer_by_lang = {}
+        for lang in target_lang:
+            tokenizer_by_lang[lang] = AutoTokenizer.from_pretrained(model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
+                                                                   cache_dir=model_args.cache_dir,
+                                                                   use_fast=model_args.use_fast_tokenizer,
+                                                                   src_lang = flores_lang_code_mapping[source_lang],
+                                                                   tgt_lang = flores_lang_code_mapping[lang])
+    
+    
+    model = AutoModelForSeq2SeqLM.from_pretrained(
+        model_args.model_name_or_path,
+        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        config=config,
+        cache_dir=model_args.cache_dir
+    )
 
-#     # Preprocessing the datasets.
-#     # We need to tokenize inputs and targets.
-#     if training_args.do_train:
-#         column_names = raw_datasets["train"].column_names
-#     elif training_args.do_eval:
-#         column_names = raw_datasets["validation"].column_names
-#     elif training_args.do_predict:
-#         column_names = raw_datasets["test"].column_names
-#     else:
-#         logger.info("There is nothing to do. Please pass `do_train`, `do_eval` and/or `do_predict`.")
-#         return
+    # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
+    # on a small vocab and want a smaller embedding size, remove this test.
+    embedding_size = model.get_input_embeddings().weight.shape[0]
+    if len(tokenizer) > embedding_size:
+        model.resize_token_embeddings(len(tokenizer))
 
-#     # For translation we set the codes of our source and target languages (only useful for mBART, the others will
-#     # ignore those attributes).
-#     if isinstance(tokenizer, tuple(MULTILINGUAL_TOKENIZERS)):
-#         assert data_args.target_lang is not None and data_args.source_lang is not None, (
-#             f"{tokenizer.__class__.__name__} is a multilingual tokenizer which requires --source_lang and "
-#             "--target_lang arguments."
-#         )
+    if model.config.decoder_start_token_id is None:
+        raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
 
-#         tokenizer.src_lang = data_args.source_lang
-#         tokenizer.tgt_lang = data_args.target_lang
+    prefix = data_args.source_prefix if data_args.source_prefix is not None else ""
 
-#         # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
-#         # as the first generated token. We ask the user to explicitly provide this as --forced_bos_token argument.
-#         forced_bos_token_id = (
-#             tokenizer.lang_code_to_id[data_args.forced_bos_token] if data_args.forced_bos_token is not None else None
-#         )
-#         model.config.forced_bos_token_id = forced_bos_token_id
+    # Preprocessing the datasets.
+    # We need to tokenize inputs and targets.
+    if training_args.do_train:
+        column_names = raw_datasets["train"].column_names
+    elif training_args.do_eval:
+        validation_splits = []
+        for lang in target_lang:
+            validation_splits.append(f"validation.{source_lang.replace('-', '_')}.{lang.replace('-', '_')}")
+        column_names = raw_datasets["validation"].column_names
+    elif training_args.do_predict:
+        test_splits = []
+        for lang in target_lang:
+            test_splits.append(f"test.{source_lang.replace('-', '_')}.{lang.replace('-', '_')}")
+        column_names = raw_datasets["test"].column_names
+    else:
+        logger.info("There is nothing to do. Please pass `do_train`, `do_eval` and/or `do_predict`.")
+        return
+    # Check the whether the source target length fits in the model, if it has absolute positional embeddings
+    if (
+        hasattr(model.config, "max_position_embeddings")
+        and not hasattr(model.config, "relative_attention_max_distance")
+        and model.config.max_position_embeddings < data_args.max_source_length
+    ):
+        raise ValueError(
+            f"`--max_source_length` is set to {data_args.max_source_length}, but the model only has"
+            f" {model.config.max_position_embeddings} position encodings. Consider either reducing"
+            f" `--max_source_length` to {model.config.max_position_embeddings} or using a model with larger position "
+            "embeddings"
+        )
 
-#     # Get the language codes for input/target.
-#     source_lang = data_args.source_lang.split("_")[0]
-#     target_lang = data_args.target_lang.split("_")[0]
+    # Temporarily set max_target_length for training.
+    max_target_length = data_args.max_target_length
+    padding = "max_length" if data_args.pad_to_max_length else False
 
-#     # Check the whether the source target length fits in the model, if it has absolute positional embeddings
-#     if (
-#         hasattr(model.config, "max_position_embeddings")
-#         and not hasattr(model.config, "relative_attention_max_distance")
-#         and model.config.max_position_embeddings < data_args.max_source_length
-#     ):
-#         raise ValueError(
-#             f"`--max_source_length` is set to {data_args.max_source_length}, but the model only has"
-#             f" {model.config.max_position_embeddings} position encodings. Consider either reducing"
-#             f" `--max_source_length` to {model.config.max_position_embeddings} or using a model with larger position "
-#             "embeddings"
-#         )
+    if training_args.label_smoothing_factor > 0 and not hasattr(model, "prepare_decoder_input_ids_from_labels"):
+        logger.warning(
+            "label_smoothing is enabled but the `prepare_decoder_input_ids_from_labels` method is not defined for "
+            f"`{model.__class__.__name__}`. This will lead to loss being calculated twice and will take up more memory"
+        )
 
-#     # Temporarily set max_target_length for training.
-#     max_target_length = data_args.max_target_length
-#     padding = "max_length" if data_args.pad_to_max_length else False
+    def preprocess_function(examples, split):
+        logger.info(f"Preprocessing {} split for {} to {}".format(split, source_lang, target_lang))
+        tgt_langs = get_langs(examples['transaltion'], source_lang)
 
-#     if training_args.label_smoothing_factor > 0 and not hasattr(model, "prepare_decoder_input_ids_from_labels"):
-#         logger.warning(
-#             "label_smoothing is enabled but the `prepare_decoder_input_ids_from_labels` method is not defined for "
-#             f"`{model.__class__.__name__}`. This will lead to loss being calculated twice and will take up more memory"
-#         )
+        inputs = [ex[source_lang] for ex in examples["translation"]]
+        targets = [ex[tgt_lang] for ex, tgt_lang in zip(examples["translation"], tgt_langs)]
 
-#     def preprocess_function(examples):
-#         inputs = [ex[source_lang] for ex in examples["translation"]]
-#         targets = [ex[target_lang] for ex in examples["translation"]]
+
+
 #         inputs = [prefix + inp for inp in inputs]
 #         model_inputs = tokenizer(inputs, max_length=data_args.max_source_length, padding=padding, truncation=True)
 
