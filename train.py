@@ -558,10 +558,18 @@ def main():
         inputs = [ex[source_lang] for ex in examples["translation"]]
         targets = [ex[tgt_lang] for ex, tgt_lang in zip(examples["translation"], tgt_langs)]
 
+        inputs = [prefix + inp for inp in inputs]
 
+        if random.random() < 0.2:
+            logger.info("inputs[-1]")
+            logger.info(inputs[-1])
+            logger.info("targets[-1]")
+            logger.info(targets[-1])
 
-#         inputs = [prefix + inp for inp in inputs]
-#         model_inputs = tokenizer(inputs, max_length=data_args.max_source_length, padding=padding, truncation=True)
+        model_inputs = tokenizer(inputs, max_length=data_args.max_source_length, padding=padding, truncation=True)
+
+        # TODO: refer to line 916
+
 
 #         # Tokenize targets with the `text_target` keyword argument
 #         labels = tokenizer(text_target=targets, max_length=max_target_length, padding=padding, truncation=True)
